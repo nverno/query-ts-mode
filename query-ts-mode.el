@@ -63,12 +63,12 @@
   :group 'query-ts)
 
 (defface query-ts-mode-node-face
-  '((t (:inherit font-lock-type-face :slant normal)))
+  '((t (:inherit font-lock-variable-name-face)))
   "Face to highlight named nodes in `query-ts-mode'."
   :group 'query-ts)
 
 (defface query-ts-mode-capture-face
-  '((t (:inherit font-lock-variable-name-face :slant italic)))
+  '((t (:inherit font-lock-type-face :slant italic)))
   "Face to highlight captures in `query-ts-mode'."
   :group 'query-ts)
 
@@ -102,7 +102,7 @@
 (defvar query-ts-mode--feature-list
   '(( comment)
     ( string function capture)
-    ( node property operator escape-sequence)
+    ( node property operator escape-sequence number)
     ( bracket delimiter error))
   "`treesit-font-lock-feature-list' for `query-ts-mode'.")
 
@@ -132,9 +132,14 @@
    '((capture)  @query-ts-mode-capture-face)
    
    :language 'query
+   :feature 'number
+   '(((parameters (identifier) @font-lock-number-face)
+      (:match "^[-+]?[0-9]+\\(.[0-9]+\\)?\\'" @font-lock-number-face)))
+
+   :language 'query
    :feature 'function
    '((predicate
-      "#" @font-lock-function-call-face
+      "#" @font-lock-operator-face
       name: (_) @font-lock-function-call-face
       type: (_) @font-lock-operator-face))
          
