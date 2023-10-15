@@ -5,7 +5,7 @@
 ;; Author: Noah Peart <noah.v.peart@gmail.com>
 ;; URL: https://github.com/nverno/query-ts-mode
 ;; Version: 0.0.1
-;; Package-Requires: ((emacs "29.1"))
+;; Package-Requires: ((emacs "29.1") (dash "2.18.0"))
 ;; Created:  12 October 2023
 ;; Keywords: languages tree-sitter query
 
@@ -48,7 +48,9 @@
 ;;
 ;;; Code:
 
-(eval-when-compile (require 'cl-lib))
+(eval-when-compile
+  (require 'cl-lib)
+  (require 'dash))
 (require 'treesit)
 
 (defcustom query-ts-mode-indent-level 2
@@ -167,6 +169,29 @@
    '((ERROR) @font-lock-warning-face))
   "Tree-sitter font-lock settings for `query-ts-mode'.")
 
+;;; Embedded regex
+
+(defvar regex-ts--feature-list)
+(defvar regex-ts--font-lock-settings)
+
+(defun query-ts-mode--treesit-language-at-point (point)
+  "Return the language at POINT."
+  (let ((node (treesit-node-at point 'query)))
+    (if (treesit-node-match-p node "\"")
+        'regex
+      'query)))
+
+(defvar query-ts-mode--treesit-range-rules
+  (when (treesit-available-p)
+    (treesit-range-rules
+     :embed 'regex
+     :host 'query
+     :offset '(1 . -1)
+     '(((predicate
+         name: (identifier) @name
+         (parameters (string) @regex))
+        (:match "^match$" @name))))))
+
 ;;; Navigation
 
 (defvar query-ts-mode--sentence-nodes nil
@@ -188,10 +213,11 @@
   :syntax-table query-ts-mode--syntax-table
   (when (treesit-ready-p 'query)
     (treesit-parser-create 'query)
-
+    
     ;; Comments
     (setq-local comment-start ";")
     (setq-local comment-end "")
+    (setq-local comment-add 1)
     (setq-local comment-start-skip ";+[ \t]*")
     (setq-local parse-sexp-ignore-comments t)
 
@@ -212,6 +238,25 @@
                    (sexp ,query-ts-mode--sexp-nodes)
                    (sentence ,query-ts-mode--sentence-nodes)
                    (text ,query-ts-mode--text-nodes))))
+
+    ;; Embedded regex parser
+    (when (and (treesit-ready-p 'regex)
+               (require 'regex-ts nil t))
+      (treesit-parser-create 'regex)
+
+      (setq-local treesit-language-at-point-function
+                  #'query-ts-mode--treesit-language-at-point)
+
+      (setq-local treesit-range-settings query-ts-mode--treesit-range-rules)
+
+      (setq-local treesit-font-lock-settings
+                  (append treesit-font-lock-settings
+                          regex-ts--font-lock-settings))
+
+      (setq-local treesit-font-lock-feature-list
+                  (--zip-with (seq-uniq (append it other))
+                              treesit-font-lock-feature-list
+                              regex-ts--feature-list)))
 
     (treesit-major-mode-setup)))
 
