@@ -51,6 +51,7 @@
 (eval-when-compile
   (require 'cl-lib)
   (require 'dash))
+(require 'seq)
 (require 'treesit)
 
 (defcustom query-ts-mode-indent-level 2
@@ -177,20 +178,28 @@
 (defun query-ts-mode--treesit-language-at-point (point)
   "Return the language at POINT."
   (let ((node (treesit-node-at point 'query)))
-    (if (treesit-node-match-p node "\"")
-        'regex
+    (if (equal (treesit-node-type node) "\"")
+        (pcase (treesit-node-text
+                (treesit-node-child
+                 (treesit-parent-until
+                  node (lambda (n) (treesit-node-match-p n "predicate")))
+                 0 t))
+          ("match" 'regex)
+          (_ 'query))
       'query)))
 
 (defvar query-ts-mode--treesit-range-rules
   (when (treesit-available-p)
     (treesit-range-rules
-     :embed 'regex
      :host 'query
+     :embed 'regex
      :offset '(1 . -1)
-     '(((predicate
-         name: (identifier) @name
-         (parameters (string) @regex))
-        (:match "^match$" @name))))))
+     :local t
+     '((predicate
+        name: (identifier) @_name
+        (parameters (string) @regex)
+        (:match "^match$" @_name)))))
+  "Ranges on which to use embedded regex parser.")
 
 ;;; Navigation
 
@@ -211,16 +220,17 @@
 \\<query-ts-mode-map>"
   :group 'query-ts
   :syntax-table query-ts-mode--syntax-table
+  
+  ;; Comments
+  (setq-local comment-start ";")
+  (setq-local comment-end "")
+  (setq-local comment-add 1)
+  (setq-local comment-start-skip ";+[ \t]*")
+  (setq-local parse-sexp-ignore-comments t)
+
   (when (treesit-ready-p 'query)
     (treesit-parser-create 'query)
     
-    ;; Comments
-    (setq-local comment-start ";")
-    (setq-local comment-end "")
-    (setq-local comment-add 1)
-    (setq-local comment-start-skip ";+[ \t]*")
-    (setq-local parse-sexp-ignore-comments t)
-
     ;; Indentation
     (setq-local treesit-simple-indent-rules query-ts-mode--indent-rules)
 
@@ -242,7 +252,6 @@
     ;; Embedded regex parser
     (when (and (treesit-ready-p 'regex)
                (require 'regex-ts nil t))
-      (treesit-parser-create 'regex)
 
       (setq-local treesit-language-at-point-function
                   #'query-ts-mode--treesit-language-at-point)

@@ -10,6 +10,9 @@ Features:
 - font-locking
 - structural navigation with treesitter objects
 
+To use the embedded regex parser to parse regexes in `match` predicates, install
+`regex-ts` from https://github.com/nverno/regex-ts.
+
 ![example](doc/example-query.png)
 
 ## Installing

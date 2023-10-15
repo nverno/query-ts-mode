@@ -25,6 +25,7 @@
 "_" @constant
 
 ((parameters (identifier) @number)
+ ;; with embedded 'regex parser ⬎
  (#match? @number "^[-+]?[0-9]+(.[0-9]+)?$"))
 
 ((program . (comment)* . (comment) @include)
