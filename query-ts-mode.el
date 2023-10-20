@@ -184,7 +184,7 @@
                  (treesit-parent-until
                   node (lambda (n) (treesit-node-match-p n "predicate")))
                  0 t))
-          ("match" 'regex)
+          ((or "lua-match" "match") 'regex)
           (_ 'query))
       'query)))
 
@@ -195,10 +195,12 @@
      :embed 'regex
      :offset '(1 . -1)
      :local t
-     '((predicate
+     `((predicate
         name: (identifier) @_name
         (parameters (string) @regex)
-        (:match "^match$" @_name)))))
+        (:match ,(rx-to-string
+                  `(seq bos (or "match" "lua-match") eos))
+                @_name)))))
   "Ranges on which to use embedded regex parser.")
 
 ;;; Navigation
@@ -270,7 +272,8 @@
     (treesit-major-mode-setup)))
 
 (when (treesit-ready-p 'query)
-  (add-to-list 'auto-mode-alist '("\\.query\\'" . query-ts-mode)))
+  (add-to-list 'auto-mode-alist '("\\.query\\'"          . query-ts-mode))
+  (add-to-list 'auto-mode-alist '("/queries/.*\\.scm\\'" . query-ts-mode)))
 
 (provide 'query-ts-mode)
 ;; Local Variables:
