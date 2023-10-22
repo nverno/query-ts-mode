@@ -1,3 +1,5 @@
+;; FIXME(nverno): askdfkasdf
+;; alsdkf WARN(nverno): kasdf
 (string) @string
 (escape_sequence) @string.escape
 (capture (identifier) @type)
@@ -25,11 +27,25 @@
 "_" @constant
 
 ((parameters (identifier) @number)
- ;; with embedded 'regex parser ⬎
+ ;; WARN(xasdf): item #12
+ ;; NOTE: with embedded 'regex parser ⬎
  (#match? @number "^[-+]?[0-9]+(.[0-9]+)?$"))
 
+;; FIXME(xkkxxk): xxx
+;; TODO(xkxkxk): .. . . . 
 ((program . (comment)* . (comment) @include)
  (#lua-match? @include "^;+ *inherits *:"))
 
+;;; WARN(dadad): akldsfsa
+;;; kasdfkasldf
 ((program . (comment)* . (comment) @preproc)
  (#lua-match? @preproc "^;+ *extends"))
+
+((program . (comment)* . (comment) @preproc)
+ (#lua-match? @preproc "^;+ *extends"))
+
+((program . (comment)* . (comment) @preproc)
+ (#match? @preproc "^;+ *extends*"))
+
+((parameters (identifier) @number)
+ (#match? @number "^[-+]?[0-9]+$"))

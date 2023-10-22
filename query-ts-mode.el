@@ -1,7 +1,5 @@
 ;;; query-ts-mode.el --- Tree-sitter support for tree-sitter queries -*- lexical-binding: t; -*-
 
-;; This is free and unencumbered software released into the public domain.
-
 ;; Author: Noah Peart <noah.v.peart@gmail.com>
 ;; URL: https://github.com/nverno/query-ts-mode
 ;; Version: 0.0.1
@@ -54,6 +52,9 @@
 (require 'seq)
 (require 'treesit)
 
+(declare-function regex-ts-font-lock-rules "regex-ts")
+(defvar regex-ts-font-lock-feature-list)
+
 (defcustom query-ts-mode-indent-level 2
   "Number of spaces for each indententation step."
   :group 'query-ts
@@ -90,41 +91,60 @@
 ;;; Indentation
 
 (defvar query-ts-mode--indent-rules
-  '((query
+  `((query
      ((parent-is "program") parent 0)
-     ((node-is ")") parent-bol 0)
+     ((node-is ")") parent 1)
      ((node-is "]") parent-bol 0)
      ((node-is "field_definition") parent-bol query-ts-mode-indent-level)
+     ((node-is "capture") parent-bol query-ts-mode-indent-level)
+     ((parent-is "list") parent-bol query-ts-mode-indent-level)
+     ((parent-is "named_node") parent 1)
+     ((node-is "named_node") standalone-parent 1)
+     ((parent-is "predicate") parent-bol query-ts-mode-indent-level)
      ((parent-is "grouping") first-sibling 1)
-     (no-node parent-bol query-ts-mode-indent-level)
-     (catch-all parent-bol query-ts-mode-indent-level)))
+     ((parent-is "parameters") parent-bol 0)
+     (no-node parent 0)
+     (catch-all parent 0)))
   "Tree-sitter indentation rules for `query-ts-mode'.")
 
 ;;; Font-Lock
 
-(defvar query-ts-mode--feature-list
+(defvar query-ts-mode-font-lock-feature-list
   '(( comment)
-    ( string function capture)
+    ( regexp string function capture)
     ( node property operator escape-sequence number)
     ( bracket delimiter error))
   "`treesit-font-lock-feature-list' for `query-ts-mode'.")
 
-(defvar query-ts-mode--font-lock-settings
+;; (defvar query-ts-mode--font-lock-embedded
+;;   (treesit-font-lock-rules))
+
+(defun query-ts-mode-font-lock-rules (&rest _embedded)
+  "Create tree-sitter font-lock rules for `query-ts-mode' accounting for
+EMBEDDED parsers."
   (treesit-font-lock-rules
    :language 'query
-   :feature 'comment
-   '([(comment)] @font-lock-comment-face)
+   :feature 'escape-sequence
+   ;; :override t
+   `((escape_sequence) @font-lock-escape-face)
 
    :language 'query
+   :feature 'regexp
+   '((predicate
+      name: ((identifier) @_name (:match "\\`\\(?:lua-\\)match\\'" @_name))
+      (parameters (string) @font-lock-regexp-face)))
+
+   :language 'query
+   :feature 'comment
+   :override 'keep
+   '([(comment)] @font-lock-comment-face)
+      
+   :language 'query
    :feature 'string
+   :override 'keep
    '((string) @font-lock-string-face
      (anonymous_node name: (_) @font-lock-string-face))
 
-   :language 'query
-   :feature 'escape-sequence
-   :override 'prepend
-   `((escape_sequence) @font-lock-escape-face)
-      
    :language 'query
    :feature 'property
    '((field_definition
@@ -132,7 +152,9 @@
 
    :language 'query
    :feature 'capture
-   '((capture)  @query-ts-mode-capture-face)
+   '((capture
+      "@" @font-lock-misc-punctuation-face
+      (identifier) @query-ts-mode-capture-face))
    
    :language 'query
    :feature 'number
@@ -145,7 +167,7 @@
       "#" @font-lock-operator-face
       name: (_) @font-lock-function-call-face
       type: (_) @font-lock-operator-face))
-         
+   
    :language 'query
    :feature 'operator
    '(["?" "*" "+" "."] @font-lock-operator-face
@@ -166,42 +188,64 @@
    
    :language 'query
    :feature 'error
-   :override t
-   '((ERROR) @font-lock-warning-face))
-  "Tree-sitter font-lock settings for `query-ts-mode'.")
+   ;; :override t
+   '((ERROR) @font-lock-warning-face)))
 
-;;; Embedded regex
+;;; Embedded comment/regex
 
+(defvar comment-ts-font-lock-settings)
+(defvar comment-ts-font-lock-feature-list)
+(defvar comment-ts-indent-rules)
 (defvar regex-ts--feature-list)
-(defvar regex-ts--font-lock-settings)
+(defvar regex-ts-font-lock-settings)
 
 (defun query-ts-mode--treesit-language-at-point (point)
   "Return the language at POINT."
   (let ((node (treesit-node-at point 'query)))
-    (if (equal (treesit-node-type node) "\"")
-        (pcase (treesit-node-text
-                (treesit-node-child
-                 (treesit-parent-until
-                  node (lambda (n) (treesit-node-match-p n "predicate")))
-                 0 t))
-          ((or "lua-match" "match") 'regex)
-          (_ 'query))
-      'query)))
+    (pcase (treesit-node-type node)
+      ("comment" 'comment)
+      ("\"" (pcase (treesit-node-text
+                    (treesit-node-child
+                     (treesit-parent-until
+                      node (lambda (n) (treesit-node-match-p n "predicate")))
+                     0 t))
+              ((or "match" "lua-match") 'regex)
+              (_ 'query)))
+      (_ 'query))))
+
+(defvar query-ts-mode--s-p-query
+  (when (treesit-available-p)
+    (treesit-query-compile
+     'query
+     '((predicate
+        name: ((identifier) @_name (:match "\\`\\(?:lua-\\)match\\'" @_name))
+        (parameters (string) @regex))))))
+
+(defun query-ts-mode--syntax-propertize (start end)
+  "Apply syntax text properties between START and END for `query-ts-mode'."
+  (let ((captures (treesit-query-capture 'query query-ts-mode--s-p-query start end)))
+    (pcase-dolist (`(,name . ,node) captures)
+      (when (eq 'regex name)
+        (let* ((ns (treesit-node-start node))
+               (ne (treesit-node-end node))
+               (syntax (string-to-syntax "|")))
+          (put-text-property ns (1+ ns) 'syntax-table syntax)
+          (put-text-property (1- ne) ne 'syntax-table syntax))))))
 
 (defvar query-ts-mode--treesit-range-rules
   (when (treesit-available-p)
     (treesit-range-rules
      :host 'query
+     :embed 'comment
+     ;; :offset '(0 . -1)
+     '((comment) @comment)
+     
+     :host 'query
      :embed 'regex
-     :offset '(1 . -1)
-     :local t
-     `((predicate
-        name: (identifier) @_name
-        (parameters (string) @regex)
-        (:match ,(rx-to-string
-                  `(seq bos (or "match" "lua-match") eos))
-                @_name)))))
-  "Ranges on which to use embedded regex parser.")
+     ;; :local t
+     ;; :offset '(1 . -1)
+     query-ts-mode--s-p-query))
+  "Ranges on which to use embedded parsers.")
 
 ;;; Navigation
 
@@ -214,6 +258,12 @@
 (defvar query-ts-mode--text-nodes
   (rx (or "comment" "string"))
   "See `treesit-text-type-regexp' for more information.")
+
+(defun query-ts--merge-features (a b)
+  "Merge `treesit-font-lock-feature-list's A with B."
+  (cl-loop for x in a
+           for y in b
+           collect (seq-uniq (append x y))))
 
 ;;;###autoload
 (define-derived-mode query-ts-mode prog-mode "Query"
@@ -231,14 +281,20 @@
   (setq-local parse-sexp-ignore-comments t)
 
   (when (treesit-ready-p 'query)
+    (when (treesit-ready-p 'comment t)
+      (treesit-parser-create 'comment))
+
+    (when (treesit-ready-p 'regex t)
+      (treesit-parser-create 'regex nil t))
+
     (treesit-parser-create 'query)
     
     ;; Indentation
     (setq-local treesit-simple-indent-rules query-ts-mode--indent-rules)
 
     ;; Font-Locking
-    (setq-local treesit-font-lock-feature-list query-ts-mode--feature-list)
-    (setq-local treesit-font-lock-settings query-ts-mode--font-lock-settings)
+    (setq-local treesit-font-lock-feature-list query-ts-mode-font-lock-feature-list)
+    (setq-local treesit-font-lock-settings (query-ts-mode-font-lock-rules))
     
     ;; Navigation
     (setq-local treesit-defun-tactic 'top-level)
@@ -250,26 +306,42 @@
                    (sexp ,query-ts-mode--sexp-nodes)
                    (sentence ,query-ts-mode--sentence-nodes)
                    (text ,query-ts-mode--text-nodes))))
+    
+    (let (langs)
+      ;; Embedded regex parser
+      (when (and (treesit-ready-p 'regex)
+                 (require 'regex-ts nil t))
+        (push 'regex langs)
+        (setq-local treesit-font-lock-settings
+                    (append treesit-font-lock-settings
+                            (regex-ts-font-lock-rules t)))
+        (setq-local treesit-font-lock-feature-list
+                    (query-ts--merge-features
+                     treesit-font-lock-feature-list
+                     regex-ts-font-lock-feature-list)))
 
-    ;; Embedded regex parser
-    (when (and (treesit-ready-p 'regex)
-               (require 'regex-ts nil t))
+      ;; Comment parser
+      (when (and (treesit-ready-p 'comment t)
+                 (require 'comment-ts nil t))
+        (push 'comment langs)
+        (setq-local treesit-font-lock-settings
+                    (append treesit-font-lock-settings comment-ts-font-lock-settings))
+        (setq-local treesit-font-lock-feature-list
+                    (query-ts--merge-features
+                     treesit-font-lock-feature-list comment-ts-font-lock-feature-list))
+        (setq-local treesit-simple-indent-rules
+                    (append treesit-simple-indent-rules comment-ts-indent-rules)))
+      (when langs
+        (setq-local treesit-language-at-point-function
+                    #'query-ts-mode--treesit-language-at-point)
+        (setq-local treesit-range-settings query-ts-mode--treesit-range-rules)))
 
-      (setq-local treesit-language-at-point-function
-                  #'query-ts-mode--treesit-language-at-point)
+    ;; (setq-local treesit-font-lock-settings
+    ;;             (append treesit-font-lock-settings query-ts-mode--font-lock-embedded))
+    
+    (treesit-major-mode-setup)
 
-      (setq-local treesit-range-settings query-ts-mode--treesit-range-rules)
-
-      (setq-local treesit-font-lock-settings
-                  (append treesit-font-lock-settings
-                          regex-ts--font-lock-settings))
-
-      (setq-local treesit-font-lock-feature-list
-                  (--zip-with (seq-uniq (append it other))
-                              treesit-font-lock-feature-list
-                              regex-ts--feature-list)))
-
-    (treesit-major-mode-setup)))
+    (setq-local syntax-propertize-function #'query-ts-mode--syntax-propertize)))
 
 (when (treesit-ready-p 'query)
   (add-to-list 'auto-mode-alist '("\\.query\\'"          . query-ts-mode))
