@@ -52,6 +52,9 @@
 (require 'seq)
 (require 'treesit)
 
+(declare-function regex-ts-font-lock-rules "regex-ts")
+(defvar regex-ts-font-lock-feature-list)
+
 (defcustom query-ts-mode-indent-level 2
   "Number of spaces for each indententation step."
   :group 'query-ts
@@ -95,7 +98,7 @@
      ((node-is "field_definition") parent-bol query-ts-mode-indent-level)
      ((node-is "capture") parent-bol query-ts-mode-indent-level)
      ((parent-is "list") parent-bol query-ts-mode-indent-level)
-     ((parent-is "named_node") parent-bol 1)
+     ((parent-is "named_node") parent 1)
      ((node-is "named_node") standalone-parent 1)
      ((parent-is "predicate") parent-bol query-ts-mode-indent-level)
      ((parent-is "grouping") first-sibling 1)
@@ -108,7 +111,7 @@
 
 (defvar query-ts-mode-font-lock-feature-list
   '(( comment)
-    ( string function capture)
+    ( regexp string function capture)
     ( node property operator escape-sequence number)
     ( bracket delimiter error))
   "`treesit-font-lock-feature-list' for `query-ts-mode'.")
@@ -126,10 +129,16 @@ EMBEDDED parsers."
    `((escape_sequence) @font-lock-escape-face)
 
    :language 'query
+   :feature 'regexp
+   '((predicate
+      name: ((identifier) @_name (:match "\\`\\(?:lua-\\)match\\'" @_name))
+      (parameters (string) @font-lock-regexp-face)))
+
+   :language 'query
    :feature 'comment
    :override 'keep
    '([(comment)] @font-lock-comment-face)
-   
+      
    :language 'query
    :feature 'string
    :override 'keep
@@ -195,13 +204,13 @@ EMBEDDED parsers."
   (let ((node (treesit-node-at point 'query)))
     (pcase (treesit-node-type node)
       ("comment" 'comment)
-      ;; ("\"" (pcase (treesit-node-text
-      ;;               (treesit-node-child
-      ;;                (treesit-parent-until
-      ;;                 node (lambda (n) (treesit-node-match-p n "predicate")))
-      ;;                0 t))
-      ;;         ("match" 'regex)
-      ;;         (_ 'query)))
+      ("\"" (pcase (treesit-node-text
+                    (treesit-node-child
+                     (treesit-parent-until
+                      node (lambda (n) (treesit-node-match-p n "predicate")))
+                     0 t))
+              ((or "match" "lua-match") 'regex)
+              (_ 'query)))
       (_ 'query))))
 
 (defvar query-ts-mode--s-p-query
@@ -209,8 +218,8 @@ EMBEDDED parsers."
     (treesit-query-compile
      'query
      '((predicate
-        name: ((identifier) @_name (:match "\\`match\\'" @_name))
-        (parameters (string "\"" _ @regex "\"") ))))))
+        name: ((identifier) @_name (:match "\\`\\(?:lua-\\)match\\'" @_name))
+        (parameters (string) @regex))))))
 
 (defun query-ts-mode--syntax-propertize (start end)
   "Apply syntax text properties between START and END for `query-ts-mode'."
@@ -228,15 +237,14 @@ EMBEDDED parsers."
     (treesit-range-rules
      :host 'query
      :embed 'comment
-     :local t
+     ;; :offset '(0 . -1)
      '((comment) @comment)
      
      :host 'query
      :embed 'regex
-     :offset '(1 . -1)
-     :local t
-     query-ts-mode--s-p-query
-     ))
+     ;; :local t
+     ;; :offset '(1 . -1)
+     query-ts-mode--s-p-query))
   "Ranges on which to use embedded parsers.")
 
 ;;; Navigation
@@ -276,8 +284,8 @@ EMBEDDED parsers."
     (when (treesit-ready-p 'comment t)
       (treesit-parser-create 'comment))
 
-    ;; (when (treesit-ready-p 'regex t)
-    ;;   (treesit-parser-create 'regex))
+    (when (treesit-ready-p 'regex t)
+      (treesit-parser-create 'regex nil t))
 
     (treesit-parser-create 'query)
     
@@ -301,14 +309,16 @@ EMBEDDED parsers."
     
     (let (langs)
       ;; Embedded regex parser
-      ;; (when (and (treesit-ready-p 'regex)
-      ;;            (require 'regex-ts nil t))
-      ;;   (push 'regex langs)
-      ;;   (setq-local treesit-font-lock-settings
-      ;;               (append treesit-font-lock-settings regex-ts-font-lock-settings))
-      ;;   (setq-local treesit-font-lock-feature-list
-      ;;               (query-ts--merge-features
-      ;;                treesit-font-lock-feature-list regex-ts--feature-list)))
+      (when (and (treesit-ready-p 'regex)
+                 (require 'regex-ts nil t))
+        (push 'regex langs)
+        (setq-local treesit-font-lock-settings
+                    (append treesit-font-lock-settings
+                            (regex-ts-font-lock-rules t)))
+        (setq-local treesit-font-lock-feature-list
+                    (query-ts--merge-features
+                     treesit-font-lock-feature-list
+                     regex-ts-font-lock-feature-list)))
 
       ;; Comment parser
       (when (and (treesit-ready-p 'comment t)
