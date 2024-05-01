@@ -27,6 +27,12 @@
 ;;; Commentary:
 ;;; Code:
 
+(require 'treesit)
+(require 'ts-lang nil t)
+
+
+(defvar-local query-lint--info nil)
+
 (defvar query-lint--query
   (when (treesit-available-p)
     (treesit-query-compile
@@ -49,8 +55,32 @@
      (directory-file-name
       (file-name-directory fname)))))
 
-(defun query-lint ()
-  (let ((parsers (treesit-parser-list)))))
+(defun query-lint-check-nodes ()
+  (pcase-let (((cl-struct ts-lang--info named anon fields) query-lint--info))
+    (pcase-dolist (`(,name . ,node) (treesit-query-capture 'query query-lint--query))
+      (let ((text (treesit-node-text node)))
+        (unless (test-completion
+                 text
+                 (pcase name
+                   ;; ('toplevel t)
+                   ;; ('error t)
+                   ;; ('predicate.name)
+                   ;; ('predicate.type)
+                   ('node.named named)
+                   ('node.anonymous anon)
+                   ('field fields)))
+          ;; TODO(4/30/24): lint it
+          (message "Invalid node: %s" text))))))
+
+
+(defun query-lint (&optional language)
+  (when (and language
+             (null query-lint--info)
+             (require 'ts-lang nil t))
+    (setq query-lint--info (ts-lang-parser-info language)))
+
+  (when query-lint--info
+    (query-lint-check-nodes)))
 
 (provide 'query-lint)
 ;; Local Variables:
