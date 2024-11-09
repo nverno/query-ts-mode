@@ -50,7 +50,7 @@
        (ERROR) @error))))
 
 (defun query-lint--guess-lang (&optional buffer)
-  (when-let ((fname (buffer-file-name buffer)))
+  (when-let* ((fname (buffer-file-name buffer)))
     (file-name-nondirectory
      (directory-file-name
       (file-name-directory fname)))))
